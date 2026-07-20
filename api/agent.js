@@ -1,6 +1,10 @@
 // /api/agent.js
-// Provider-agnostic AI endpoint. Drop ANTHROPIC_API_KEY or OPENAI_API_KEY
-// into Vercel's Environment Variables and this just works — no code changes.
+// Provider-agnostic AI endpoint.
+// Add ONE of these to Vercel Environment Variables:
+//   OPENROUTER_API_KEY  → uses OpenRouter (free models supported)
+//   OPENAI_API_KEY      → uses OpenAI directly
+//   ANTHROPIC_API_KEY   → uses Anthropic directly
+// Optional: OPENROUTER_MODEL to override the default free model
 
 const SYSTEM_PROMPT = `You are Frost, the AI comfort assistant for Chill365 Ltd, an air conditioning and cooling installation, repair and maintenance company based in Chorlton-cum-Hardy, Manchester, with 20+ years experience serving domestic and commercial customers in Greater Manchester.
 
@@ -33,18 +37,59 @@ export default async function handler(req, res) {
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
+  const openrouterKey = process.env.OPENROUTER_API_KEY;
+  const openrouterModel = process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free';
 
-  if (!anthropicKey && !openaiKey) {
+  if (!anthropicKey && !openaiKey && !openrouterKey) {
     res.status(200).json({
-      reply:
-        "I'm not fully switched on yet — the site owner needs to add an ANTHROPIC_API_KEY or OPENAI_API_KEY in the Vercel project settings to bring me online.",
+      reply: "I'm not fully switched on yet — the site owner needs to add an API key in the Vercel project settings to bring me online.",
       handoff: false,
     });
     return;
   }
 
+  async function callOpenAICompat(url, key, model, extraHeaders = {}) {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${key}`,
+        ...extraHeaders,
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 500,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          ...messages.map((m) => ({ role: m.role, content: m.content })),
+        ],
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(JSON.stringify(data));
+    return data.choices?.[0]?.message?.content || '';
+  }
+
   try {
-    if (anthropicKey) {
+    let text = '';
+
+    if (openrouterKey) {
+      text = await callOpenAICompat(
+        'https://openrouter.ai/api/v1/chat/completions',
+        openrouterKey,
+        openrouterModel,
+        {
+          'HTTP-Referer': 'https://chill365.vercel.app',
+          'X-Title': 'Chill365 Comfort Assistant',
+        }
+      );
+    } else if (openaiKey) {
+      text = await callOpenAICompat(
+        'https://api.openai.com/v1/chat/completions',
+        openaiKey,
+        'gpt-4o-mini'
+      );
+    } else if (anthropicKey) {
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -60,44 +105,12 @@ export default async function handler(req, res) {
         }),
       });
       const data = await r.json();
-      if (!r.ok) {
-        console.error('Anthropic error', data);
-        res.status(200).json({ reply: 'Sorry, I had trouble responding just then — mind trying again?', handoff: false });
-        return;
-      }
-      const text = (data.content || [])
-        .filter((b) => b.type === 'text')
-        .map((b) => b.text)
-        .join('\n');
-      const handoff = text.includes('[HANDOFF_WHATSAPP]');
-      res.status(200).json({ reply: text.replace('[HANDOFF_WHATSAPP]', '').trim(), handoff });
-      return;
+      if (!r.ok) throw new Error(JSON.stringify(data));
+      text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
     }
 
-    if (openaiKey) {
-      const r = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${openaiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          max_tokens: 500,
-          messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages.map((m) => ({ role: m.role, content: m.content }))],
-        }),
-      });
-      const data = await r.json();
-      if (!r.ok) {
-        console.error('OpenAI error', data);
-        res.status(200).json({ reply: 'Sorry, I had trouble responding just then — mind trying again?', handoff: false });
-        return;
-      }
-      const text = data.choices?.[0]?.message?.content || '';
-      const handoff = text.includes('[HANDOFF_WHATSAPP]');
-      res.status(200).json({ reply: text.replace('[HANDOFF_WHATSAPP]', '').trim(), handoff });
-      return;
-    }
+    const handoff = text.includes('[HANDOFF_WHATSAPP]');
+    res.status(200).json({ reply: text.replace('[HANDOFF_WHATSAPP]', '').trim(), handoff });
   } catch (err) {
     console.error('Agent error', err);
     res.status(200).json({ reply: 'Sorry, something went wrong on my end — mind trying again?', handoff: false });
