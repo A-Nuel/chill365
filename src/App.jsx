@@ -1,24 +1,28 @@
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Nav from './components/Nav';
-import Hero from './components/Hero';
-import RefrigerantLine from './components/RefrigerantLine';
-import Services from './components/Services';
-import WhyUs from './components/WhyUs';
 import Footer from './components/Footer';
 import ComfortAssistant from './components/ComfortAssistant';
+import Home from './pages/Home';
+import Services from './pages/Services';
+import About from './pages/About';
+import Gallery from './pages/Gallery';
+import Contact from './pages/Contact';
 
-function App() {
+export default function App() {
   return (
-    <>
+    <BrowserRouter>
       <Nav />
-      <Hero />
-      <RefrigerantLine />
-      <Services />
-      <WhyUs />
-      <RefrigerantLine flip />
+      <main>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/services" element={<Services />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/gallery" element={<Gallery />} />
+          <Route path="/contact" element={<Contact />} />
+        </Routes>
+      </main>
       <Footer />
       <ComfortAssistant />
-    </>
+    </BrowserRouter>
   );
 }
-
-export default App;
